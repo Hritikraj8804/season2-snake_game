@@ -1,0 +1,52 @@
+name: Deploy Snake Game to EC2
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Hub Login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/snake-game:latest .
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/snake-game:latest
+
+      - name: Deploy application
+        run: |
+          # Stop any existing container
+          docker stop snake-game || true
+          docker rm snake-game || true
+
+          # Run the new container
+          docker run -d --name snake-game -p 80:5000 ${{ secrets.DOCKERHUB_USERNAME }}/snake-game:latest
+
+      - name: Validate application deployment
+        run: |
+          # Use curl to check if the application is reachable
+          # Use a loop to retry in case the container takes a moment to start
+          for i in {1..10}; do
+            STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:80)
+            if [ "$STATUS_CODE" -eq 200 ]; then
+              echo "✅ Application deployed and running successfully!"
+              exit 0
+            fi
+            echo "Deployment check failed with status code: $STATUS_CODE. Retrying..."
+            sleep 5
+          done
+          echo "❌ Application failed to deploy successfully after multiple retries."
+          exit 1
+      
